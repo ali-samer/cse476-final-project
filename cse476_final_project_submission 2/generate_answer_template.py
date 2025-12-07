@@ -2,9 +2,6 @@
 """
 Generate a placeholder answer file that matches the expected auto-grader format.
 
-Replace the placeholder logic inside `build_answers()` with your own agent loop
-before submitting so the ``output`` fields contain your real predictions.
-
 Reads the input questions from cse_476_final_project_test_data.json and writes
 an answers JSON file where each entry contains a string under the "output" key.
 """
@@ -14,7 +11,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, List
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
+from tqdm import tqdm
+from src.agent import run_agent
 
 INPUT_PATH = Path("cse_476_final_project_test_data.json")
 OUTPUT_PATH = Path("cse_476_final_project_answers.json")
@@ -29,13 +29,25 @@ def load_questions(path: Path) -> List[Dict[str, Any]]:
 
 
 def build_answers(questions: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    answers = []
-    for idx, question in enumerate(questions, start=1):
-        # Example: assume you have an agent loop that produces an answer string.
-        # real_answer = agent_loop(question["input"])
-        # answers.append({"output": real_answer})
-        placeholder_answer = f"Placeholder answer for question {idx}"
-        answers.append({"output": placeholder_answer})
+    answers: List[Dict[str, str]] = []
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        for idx, question in enumerate(tqdm(questions, desc="Generating answers"), start=1):
+            future = executor.submit(run_agent, question["input"], domain=None, verbose=False)
+            try:
+                real_answer = future.result(timeout=5)  # five second timeout in-case the model takes too long to answer
+                if not isinstance(real_answer, str):
+                    real_answer = str(real_answer)
+            except TimeoutError:
+                # using an empty string in case the model does not answer
+                real_answer = ""
+
+            answers.append({"output": real_answer})
+
+            if idx % 5 == 0:
+                with OUTPUT_PATH.open("w") as fp:
+                    json.dump(answers, fp, ensure_ascii=False, indent=2)
+
     return answers
 
 
@@ -78,4 +90,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
